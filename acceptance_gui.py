@@ -243,6 +243,9 @@ class AcceptanceWindow(QMainWindow):
         self.adc_timer = QTimer(self)
         self.adc_timer.setInterval(200)
         self.adc_timer.timeout.connect(self.read_adc)
+        self.io_timer = QTimer(self)
+        self.io_timer.setInterval(200)
+        self.io_timer.timeout.connect(self.read_io)
         self.motor_stop_timer = QTimer(self)
         self.motor_stop_timer.setSingleShot(True)
         self.motor_stop_timer.timeout.connect(self.emergency_stop)
@@ -445,13 +448,16 @@ class AcceptanceWindow(QMainWindow):
 
         controls = QHBoxLayout()
         read_button = QPushButton("读取 IO")
-        read_button.clicked.connect(self.read_adc)
+        read_button.clicked.connect(self.read_io)
+        self.io_live = QCheckBox("5 Hz 实时刷新")
+        self.io_live.toggled.connect(self.toggle_io_live)
         controls.addWidget(read_button)
+        controls.addWidget(self.io_live)
         controls.addStretch(1)
         layout.addLayout(controls)
 
         io_note = QLabel(
-            "IO0–IO7 为 8 路数字电平。实时刷新在 ADC 页开启；"
+            "IO0–IO7 为 8 路数字电平，可在本页独立开启 5 Hz 实时刷新；"
             "输入模式下可直接观察传感器变化，无需解锁写操作。"
         )
         io_note.setWordWrap(True)
@@ -493,6 +499,7 @@ class AcceptanceWindow(QMainWindow):
         write_layout.addWidget(self.io_level_button, 1, 5)
         layout.addWidget(write_group)
         layout.addStretch(1)
+        self._update_adc_write_controls()
         return page
 
     def _build_rgb_tab(self) -> QWidget:
@@ -501,10 +508,14 @@ class AcceptanceWindow(QMainWindow):
 
         info = QLabel(
             "ADC/IO 扩展板支持两颗 RGB LED（索引 0、1）。"
-            "写入前请先在“数字 IO”页确认接线并解锁输出。"
+            "颜色写入和关闭操作需要在本页解锁。"
         )
         info.setWordWrap(True)
         layout.addWidget(info)
+
+        self.rgb_write_unlock = QCheckBox("我确认允许控制 RGB LED")
+        self.rgb_write_unlock.toggled.connect(self.toggle_rgb_write_unlock)
+        layout.addWidget(self.rgb_write_unlock)
 
         self.led_unlock_notice = QLabel()
         self.led_unlock_notice.setStyleSheet("color: #6b7280;")
@@ -523,6 +534,8 @@ class AcceptanceWindow(QMainWindow):
         self.led_color_picker.clicked.connect(self.choose_led_color)
         self.led_button = QPushButton("写 RGB 颜色")
         self.led_button.clicked.connect(self.write_led)
+        self.led_off_button = QPushButton("关闭全部 RGB")
+        self.led_off_button.clicked.connect(self.turn_off_leds)
         color_row = QWidget()
         color_layout = QHBoxLayout(color_row)
         color_layout.setContentsMargins(0, 0, 0, 0)
@@ -530,11 +543,16 @@ class AcceptanceWindow(QMainWindow):
         color_layout.addWidget(self.led_color_picker, 1)
         form.addRow("LED 索引", self.led_index)
         form.addRow("颜色", color_row)
-        form.addRow("", self.led_button)
+        led_actions = QWidget()
+        led_actions_layout = QHBoxLayout(led_actions)
+        led_actions_layout.setContentsMargins(0, 0, 0, 0)
+        led_actions_layout.addWidget(self.led_button)
+        led_actions_layout.addWidget(self.led_off_button)
+        form.addRow("", led_actions)
         layout.addWidget(controls)
         layout.addStretch(1)
         self._set_led_color(QColor("#000000"))
-        self._update_adc_write_controls()
+        self._update_rgb_write_controls()
         return page
 
     def _build_fan_tab(self) -> QWidget:
@@ -557,7 +575,7 @@ class AcceptanceWindow(QMainWindow):
         form = QFormLayout()
         self.fan_duty = QSpinBox()
         self.fan_duty.setRange(0, 100)
-        self.fan_duty.setValue(30)
+        self.fan_duty.setValue(80)
         form.addRow("占空比 (%)", self.fan_duty)
         layout.addLayout(form)
         buttons = QHBoxLayout()
@@ -834,7 +852,9 @@ class AcceptanceWindow(QMainWindow):
 
     def close_adc(self) -> None:
         self.adc_timer.stop()
+        self.io_timer.stop()
         self.adc_live.setChecked(False)
+        self.io_live.setChecked(False)
         if not self.adc_opened:
             return
         call = self._call("adc_io_close")
@@ -851,22 +871,46 @@ class AcceptanceWindow(QMainWindow):
         else:
             self.adc_timer.stop()
 
+    def toggle_io_live(self, enabled: bool) -> None:
+        if enabled:
+            if not self.adc_opened and not self.open_adc():
+                self.io_live.setChecked(False)
+                return
+            self.io_timer.start()
+        else:
+            self.io_timer.stop()
+
     def read_adc(self) -> bool:
         if not self.adc_opened and not self.open_adc():
             return False
         values_type = ctypes.c_uint16 * 10
         values = values_type()
         values_call = self._call("ADC_GetAll", values)
-        input_call = self._call("adc_io_InputGetAll")
-        mode = ctypes.c_uint8()
-        mode_call = self._call("adc_io_ModeGetAll", ctypes.byref(mode))
-        if values_call is None or input_call is None or mode_call is None:
+        if values_call is None:
             return False
-        passed = values_call.result == 0 and input_call.result >= 0 and mode_call.result == 0
+        passed = values_call.result == 0
         if passed:
             for index, value in enumerate(values[:9]):
                 self.adc_table.item(index, 1).setText(str(value))
             self.power_value.setText(f"板载电源电压原始值：{values[9]}")
+        self.record(
+            "adc.sample",
+            "通过" if passed else "失败",
+            f"values={list(values)}" if passed else "ADC 读取失败",
+            values_call,
+        )
+        return passed
+
+    def read_io(self) -> bool:
+        if not self.adc_opened and not self.open_adc():
+            return False
+        input_call = self._call("adc_io_InputGetAll")
+        mode = ctypes.c_uint8()
+        mode_call = self._call("adc_io_ModeGetAll", ctypes.byref(mode))
+        if input_call is None or mode_call is None:
+            return False
+        passed = input_call.result >= 0 and mode_call.result == 0
+        if passed:
             for index in range(8):
                 input_level = (input_call.result >> index) & 1
                 mode_level = (mode.value >> index) & 1
@@ -879,11 +923,11 @@ class AcceptanceWindow(QMainWindow):
                 f"模式掩码：0x{mode.value:02X} ({mode.value:08b})"
             )
         self.record(
-            "adc.sample",
+            "io.sample",
             "通过" if passed else "失败",
-            f"values={list(values)}, input=0x{input_call.result & 0xff:02X}, mode=0x{mode.value:02X}"
+            f"input=0x{input_call.result & 0xff:02X}, mode=0x{mode.value:02X}"
             if passed
-            else "ADC/IO 读取失败",
+            else "IO 读取失败",
         )
         return passed
 
@@ -904,11 +948,8 @@ class AcceptanceWindow(QMainWindow):
 
     def _update_adc_write_controls(self) -> None:
         enabled = self.adc_write_unlock.isChecked()
-        for widget in (self.io_mode_button, self.io_level_button, self.led_button):
+        for widget in (self.io_mode_button, self.io_level_button):
             widget.setEnabled(enabled)
-        self.led_unlock_notice.setText(
-            "RGB 写入已解锁。" if enabled else "RGB 写入已锁定；请先到“数字 IO”页解锁。"
-        )
 
     def _ensure_adc_write(self) -> bool:
         if not self.adc_write_unlock.isChecked():
@@ -929,6 +970,35 @@ class AcceptanceWindow(QMainWindow):
         call = self._call("adc_io_Set", self.io_channel.value(), self.io_level.currentIndex())
         if call:
             self.record("adc.write_level", "通过" if call.result == 0 else "失败", call.error_text, call)
+
+    def toggle_rgb_write_unlock(self, enabled: bool) -> None:
+        if enabled:
+            answer = QMessageBox.warning(
+                self,
+                "确认 RGB 输出",
+                "确认允许改变扩展板上的两颗 RGB LED？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.rgb_write_unlock.blockSignals(True)
+                self.rgb_write_unlock.setChecked(False)
+                self.rgb_write_unlock.blockSignals(False)
+        self._update_rgb_write_controls()
+
+    def _update_rgb_write_controls(self) -> None:
+        enabled = self.rgb_write_unlock.isChecked()
+        self.led_button.setEnabled(enabled)
+        self.led_off_button.setEnabled(enabled)
+        self.led_unlock_notice.setText(
+            "RGB 写入已解锁。" if enabled else "RGB 写入已锁定；请先在本页解锁。"
+        )
+
+    def _ensure_rgb_write(self) -> bool:
+        if not self.rgb_write_unlock.isChecked():
+            QMessageBox.warning(self, "RGB 已锁定", "请先在 RGB LED 页解锁写操作。")
+            return False
+        return self.adc_opened or self.open_adc()
 
     def _set_led_color(self, color: QColor) -> None:
         value = (color.red() << 16) | (color.green() << 8) | color.blue()
@@ -953,7 +1023,7 @@ class AcceptanceWindow(QMainWindow):
             self._set_led_color(selected)
 
     def write_led(self) -> None:
-        if not self._ensure_adc_write():
+        if not self._ensure_rgb_write():
             return
         try:
             color = int(self.led_color.text().strip(), 0)
@@ -966,6 +1036,20 @@ class AcceptanceWindow(QMainWindow):
         call = self._call("adc_led_set", self.led_index.value(), color)
         if call:
             self.record("adc.write_led", "通过" if call.result == 0 else "失败", call.error_text, call)
+
+    def turn_off_leds(self) -> None:
+        if not self._ensure_rgb_write():
+            return
+        calls = [self._call("adc_led_set", index, 0) for index in (0, 1)]
+        passed = all(call is not None and call.result == 0 for call in calls)
+        self.record(
+            "adc.write_led_off",
+            "通过" if passed else "失败",
+            "LED0=0x000000, LED1=0x000000",
+        )
+        if passed:
+            self._set_led_color(QColor("#000000"))
+            self.statusBar().showMessage("两颗 RGB LED 已关闭", 3000)
 
     def connect_fan(self) -> bool:
         if self.fan_pi is not None and getattr(self.fan_pi, "connected", False):
@@ -1145,6 +1229,7 @@ class AcceptanceWindow(QMainWindow):
         QApplication.processEvents()
         self.open_adc()
         self.read_adc()
+        self.read_io()
         QApplication.processEvents()
         self.open_cds()
         self.record("motor.position_read", "不支持", "底盘电机无编码器，跳过位置读取")
@@ -1171,6 +1256,7 @@ class AcceptanceWindow(QMainWindow):
             "events": self.events,
             "safety": {
                 "adc_write_unlocked": self.adc_write_unlock.isChecked(),
+                "rgb_write_unlocked": self.rgb_write_unlock.isChecked(),
                 "fan_unlocked": self.fan_unlock.isChecked(),
                 "motor_unlocked": self.motor_unlock.isChecked(),
                 "motor_speed_input_limit": 1024,
@@ -1189,6 +1275,7 @@ class AcceptanceWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt API name
         self.mpu_timer.stop()
         self.adc_timer.stop()
+        self.io_timer.stop()
         self.motor_stop_timer.stop()
         try:
             self.emergency_stop(silent=True)

@@ -64,7 +64,7 @@ OpenLibUptech 是对旧版 UpTech/TechStar 机器人系统中 libuptech.so 的�
 
 - 0% 和 100% 使用持续低/高电平；
 - 1%–99% 使用 800 Hz PWM；
-- uptech-fan.service 可在开机后保持风扇满速；
+- uptech-fan.service 会在每次开机后把风扇设置为 800 Hz、80% PWM；
 - pigpiod.service 只监听本机，避免把控制接口暴露到网络。
 
 #### PyQt6 硬件验收界面
@@ -280,7 +280,7 @@ The fan is outside the libuptech.so ABI and is controlled through pigpiod on GPI
 
 - 0% and 100% use steady low/high levels;
 - 1%–99% uses 800 Hz PWM;
-- uptech-fan.service can hold the fan at full speed after boot;
+- uptech-fan.service sets the fan to 800 Hz and 80% PWM after every boot;
 - pigpiod.service listens on localhost only.
 
 #### PyQt6 hardware acceptance panel
