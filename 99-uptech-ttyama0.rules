@@ -1,0 +1,2 @@
+# Keep the dedicated UpTech motor UART accessible to members of dialout.
+KERNEL=="ttyAMA0", GROUP="dialout", MODE="0660"
