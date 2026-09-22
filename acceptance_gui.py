@@ -257,7 +257,9 @@ class AcceptanceWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_overview_tab(library_path), "环境与 ABI")
         self.tabs.addTab(self._build_mpu_tab(), "MPU6500")
-        self.tabs.addTab(self._build_adc_tab(), "ADC / IO")
+        self.tabs.addTab(self._build_adc_tab(), "ADC")
+        self.tabs.addTab(self._build_io_tab(), "数字 IO")
+        self.tabs.addTab(self._build_rgb_tab(), "RGB LED")
         self.tabs.addTab(self._build_fan_tab(), "风扇")
         self.tabs.addTab(self._build_motor_tab(), "有刷底盘电机")
 
@@ -414,6 +416,26 @@ class AcceptanceWindow(QMainWindow):
 
         self.power_value = QLabel("板载电源电压原始值：—")
         layout.addWidget(self.power_value)
+        layout.addStretch(1)
+        return page
+
+    def _build_io_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        controls = QHBoxLayout()
+        read_button = QPushButton("读取 IO")
+        read_button.clicked.connect(self.read_adc)
+        controls.addWidget(read_button)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        io_note = QLabel(
+            "IO0–IO7 为 8 路数字电平。实时刷新在 ADC 页开启；"
+            "输入模式下可直接观察传感器变化，无需解锁写操作。"
+        )
+        io_note.setWordWrap(True)
+        layout.addWidget(io_note)
 
         self.io_value = QLabel("输入掩码：—    模式掩码：—")
         self.io_value.setWordWrap(True)
@@ -428,7 +450,7 @@ class AcceptanceWindow(QMainWindow):
             self.io_table.setItem(1, index, QTableWidgetItem("—"))
         layout.addWidget(self.io_table)
 
-        write_group = QGroupBox("IO / LED 写操作（默认锁定）")
+        write_group = QGroupBox("IO 写操作（默认锁定）")
         write_layout = QGridLayout(write_group)
         self.adc_write_unlock = QCheckBox("我确认已核对接线，允许写 ADC 扩展板输出")
         self.adc_write_unlock.toggled.connect(self.toggle_adc_write_unlock)
@@ -442,11 +464,6 @@ class AcceptanceWindow(QMainWindow):
         self.io_level_button = QPushButton("写电平")
         self.io_mode_button.clicked.connect(self.write_io_mode)
         self.io_level_button.clicked.connect(self.write_io_level)
-        self.led_index = QSpinBox()
-        self.led_index.setRange(0, 1)
-        self.led_color = QLineEdit("0x000000")
-        self.led_button = QPushButton("写 LED RGB")
-        self.led_button.clicked.connect(self.write_led)
         write_layout.addWidget(self.adc_write_unlock, 0, 0, 1, 6)
         write_layout.addWidget(QLabel("IO"), 1, 0)
         write_layout.addWidget(self.io_channel, 1, 1)
@@ -454,11 +471,37 @@ class AcceptanceWindow(QMainWindow):
         write_layout.addWidget(self.io_mode_button, 1, 3)
         write_layout.addWidget(self.io_level, 1, 4)
         write_layout.addWidget(self.io_level_button, 1, 5)
-        write_layout.addWidget(QLabel("LED"), 2, 0)
-        write_layout.addWidget(self.led_index, 2, 1)
-        write_layout.addWidget(self.led_color, 2, 2, 1, 2)
-        write_layout.addWidget(self.led_button, 2, 4, 1, 2)
         layout.addWidget(write_group)
+        layout.addStretch(1)
+        return page
+
+    def _build_rgb_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        info = QLabel(
+            "ADC/IO 扩展板支持两颗 RGB LED（索引 0、1）。"
+            "写入前请先在“数字 IO”页确认接线并解锁输出。"
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        self.led_unlock_notice = QLabel()
+        self.led_unlock_notice.setStyleSheet("color: #6b7280;")
+        layout.addWidget(self.led_unlock_notice)
+
+        controls = QGroupBox("RGB LED 控制")
+        form = QFormLayout(controls)
+        self.led_index = QSpinBox()
+        self.led_index.setRange(0, 1)
+        self.led_color = QLineEdit("0x000000")
+        self.led_button = QPushButton("写 RGB 颜色")
+        self.led_button.clicked.connect(self.write_led)
+        form.addRow("LED 索引", self.led_index)
+        form.addRow("24 位 RGB", self.led_color)
+        form.addRow("", self.led_button)
+        layout.addWidget(controls)
+        layout.addStretch(1)
         self._update_adc_write_controls()
         return page
 
@@ -831,6 +874,9 @@ class AcceptanceWindow(QMainWindow):
         enabled = self.adc_write_unlock.isChecked()
         for widget in (self.io_mode_button, self.io_level_button, self.led_button):
             widget.setEnabled(enabled)
+        self.led_unlock_notice.setText(
+            "RGB 写入已解锁。" if enabled else "RGB 写入已锁定；请先到“数字 IO”页解锁。"
+        )
 
     def _ensure_adc_write(self) -> bool:
         if not self.adc_write_unlock.isChecked():
