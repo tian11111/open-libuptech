@@ -179,7 +179,7 @@ sudo systemctl enable --now pigpiod.service uptech-fan.service
 - ID7/ID8 有刷电机已用短脉冲验证可转动并自动归零；
 - 风扇已验证可稳定满速和中间 PWM 调速。
 
-![OpenLibUptech hardware acceptance GUI](./微信图片_2026-09-22_124111_530.png)
+![OpenLibUptech hardware acceptance GUI](./hardware-acceptance-overview.png)
 
 这张截图展示的是“环境与 ABI”页：它不是原厂镜像截图，而是 64 位移植版本在实际树莓派上的验收结果。
 
@@ -395,7 +395,7 @@ Last live verification (2026-09-22): Raspberry Pi 4, 64-bit Raspberry Pi OS, AAr
 - ID7/ID8 brushed motors turning under short pulses and returning to zero;
 - stable full-speed and intermediate PWM fan control.
 
-![OpenLibUptech hardware acceptance GUI](./微信图片_2026-09-22_124111_530.png)
+![OpenLibUptech hardware acceptance GUI](./hardware-acceptance-overview.png)
 
 This screenshot is a real acceptance result from the 64-bit port, not a screenshot of the original vendor image.
 
