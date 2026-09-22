@@ -447,7 +447,8 @@ class AcceptanceWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         info = QLabel(
-            "风扇使用 GPIO18 硬件 PWM，频率 20 kHz。连接 pigpiod 本身不会启动风扇。"
+            "风扇使用 GPIO18：0%/100% 为持续低/高电平，1–99% 使用 800 Hz PWM。"
+            "连接 pigpiod 本身不会改变风扇状态。"
         )
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -859,20 +860,31 @@ class AcceptanceWindow(QMainWindow):
             return
         if not self.connect_fan():
             return
-        result = int(self.fan_pi.hardware_PWM(18, 20000, duty * 10000))
+        if duty == 0:
+            result = int(self.fan_pi.write(18, 0))
+            detail = "GPIO18 持续低电平 / 0%"
+        elif duty == 100:
+            result = int(self.fan_pi.write(18, 1))
+            detail = "GPIO18 持续高电平 / 100%"
+        else:
+            range_result = int(self.fan_pi.set_PWM_range(18, 100))
+            actual_frequency = int(self.fan_pi.set_PWM_frequency(18, 800))
+            duty_result = int(self.fan_pi.set_PWM_dutycycle(18, duty))
+            result = range_result if range_result < 0 else duty_result
+            detail = f"GPIO18 / {actual_frequency} Hz / {duty}%"
         passed = result == 0
         if passed:
             self.fan_output_owned = True
-        self.fan_status.setText(f"GPIO18 / 20 kHz / {duty}%" if passed else f"pigpio 错误 {result}")
+        self.fan_status.setText(detail if passed else f"pigpio 错误 {result}")
         self.record("fan.pwm", "通过" if passed else "失败", self.fan_status.text())
 
     def stop_fan(self) -> None:
         if not self.connect_fan():
             return
-        result = int(self.fan_pi.hardware_PWM(18, 20000, 0))
+        result = int(self.fan_pi.write(18, 0))
         if result == 0:
             self.fan_output_owned = True
-        self.fan_status.setText("GPIO18 / 20 kHz / 0%（已停止）")
+        self.fan_status.setText("GPIO18 持续低电平 / 0%（已停止）")
         self.record("fan.stop", "通过" if result == 0 else "失败", f"pigpio result={result}")
 
     def open_cds(self) -> bool:
@@ -1061,7 +1073,7 @@ class AcceptanceWindow(QMainWindow):
             pass
         try:
             if self.fan_pi is not None and self.fan_output_owned:
-                self.fan_pi.hardware_PWM(18, 20000, 0)
+                self.fan_pi.write(18, 0)
             if self.fan_pi is not None:
                 self.fan_pi.stop()
         except Exception:

@@ -1,13 +1,13 @@
 [Unit]
-Description=OpenLibUptech GPIO18 fan PWM
+Description=OpenLibUptech GPIO18 fan full-speed output
 Requires=pigpiod.service
 After=pigpiod.service
 ConditionPathExists=/usr/local/bin/pigs
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/pigs hp 18 20000 1000000
-ExecStop=/usr/local/bin/pigs hp 18 20000 0
+ExecStart=/usr/local/bin/pigs w 18 1
+ExecStop=/usr/local/bin/pigs w 18 0
 RemainAfterExit=yes
 
 [Install]

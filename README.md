@@ -44,6 +44,11 @@ running `pigpiod`. The accompanying `pigpiod.service` runs the daemon in the
 foreground under systemd and restricts its socket to localhost. Its fan setup
 uses GPIO18 hardware PWM at 20 kHz and full duty cycle.
 
+The acceptance GUI uses steady GPIO levels at 0% and 100%, avoiding needless
+high-frequency switching at the endpoints. Intermediate fan settings use
+800 Hz PWM, which matches the legacy wrapper's `set_PWM_dutycycle` path more
+closely and is more stable with the tested two-wire fan power stage.
+
 To make the fan start after every boot, install both systemd units. The fan unit
 starts only after pigpiod is ready and stops PWM before pigpiod shuts down:
 
