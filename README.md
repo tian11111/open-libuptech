@@ -84,7 +84,8 @@ python3 acceptance_gui.py ./libuptech.so
 ```
 
 The read-only suite checks the ABI, device nodes, MPU6500 samples, ADC/IO input,
-CDS-bus controller feedback for IDs 7 and 8, and the local pigpiod connection.
+the CDS bus open path, and the local pigpiod connection. It does not request
+position feedback because the tested brushed chassis motors have no encoders.
 It does not start the fan or send nonzero motor speed. ADC/IO writes, fan PWM,
 and brushed chassis motor commands each have an explicit safety unlock. Motor
 tests are limited to `-100..100`, use a `100..1000 ms` pulse, automatically send

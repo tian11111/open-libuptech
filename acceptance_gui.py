@@ -331,7 +331,7 @@ class AcceptanceWindow(QMainWindow):
         layout.addLayout(buttons)
 
         note = QLabel(
-            "只读验收会检测 MPU、读取 ADC/IO、读取 7/8 号底盘控制器位置并连接 pigpiod；"
+            "只读验收会检测 MPU、读取 ADC/IO、打开底盘总线并连接 pigpiod；"
             "不会启动风扇，也不会向电机发送非零速度。"
         )
         note.setWordWrap(True)
@@ -493,17 +493,15 @@ class AcceptanceWindow(QMainWindow):
         bus = QHBoxLayout()
         open_button = QPushButton("打开 CDS 总线")
         open_button.clicked.connect(self.open_cds)
-        read_button = QPushButton("读取 7/8 号位置（不转动）")
-        read_button.clicked.connect(self.read_motor_positions)
         close_button = QPushButton("关闭总线")
         close_button.clicked.connect(self.close_cds)
         bus.addWidget(open_button)
-        bus.addWidget(read_button)
         bus.addWidget(close_button)
         bus.addStretch(1)
         layout.addLayout(bus)
-        self.motor_position = QLabel("ID7：—    ID8：—")
-        layout.addWidget(self.motor_position)
+        feedback_note = QLabel("该底盘电机没有编码器，不读取位置反馈。")
+        feedback_note.setStyleSheet("color: #6b7280;")
+        layout.addWidget(feedback_note)
 
         self.motor_unlock = QCheckBox("车轮已完全架空并固定，允许发送电机命令")
         self.motor_unlock.toggled.connect(self.toggle_motor_unlock)
@@ -909,28 +907,6 @@ class AcceptanceWindow(QMainWindow):
             self.record("motor.bus_close", "通过" if call.result == 0 else "失败", call.error_text, call)
         self.cds_opened = False
 
-    def read_motor_positions(self) -> bool:
-        if not self.cds_opened and not self.open_cds():
-            return False
-        left = self._call("cds_servo_GetPos", 7)
-        right = self._call("cds_servo_GetPos", 8)
-        if left is None or right is None:
-            return False
-        passed = left.result >= 0 and right.result >= 0
-        unsupported = (
-            left.result < 0
-            and right.result < 0
-            and left.err == errno.EIO
-            and right.err == errno.EIO
-        )
-        self.motor_position.setText(f"ID7：{left.result}    ID8：{right.result}")
-        self.record(
-            "motor.position_read",
-            "通过" if passed else "不支持" if unsupported else "失败",
-            f"ID7={left.result}, ID8={right.result}; 某些有刷控制器可能不提供位置反馈",
-        )
-        return passed or unsupported
-
     def toggle_motor_unlock(self, enabled: bool) -> None:
         if enabled:
             answer = QMessageBox.warning(
@@ -1015,7 +991,7 @@ class AcceptanceWindow(QMainWindow):
         self.read_adc()
         QApplication.processEvents()
         self.open_cds()
-        self.read_motor_positions()
+        self.record("motor.position_read", "不支持", "底盘电机无编码器，跳过位置读取")
         self.connect_fan()
         self.record("mpu.attitude", "不支持", "兼容库当前返回 ENOTSUP")
         self.log("suite", "只读验收完成")
