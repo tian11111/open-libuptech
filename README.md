@@ -64,7 +64,7 @@ OpenLibUptech 是对旧版 UpTech/TechStar 机器人系统中 libuptech.so 的�
 
 - 0% 和 100% 使用持续低/高电平；
 - 1%–99% 使用 800 Hz PWM；
-- uptech-fan.service 可在开机后保持风扇满速；
+- uptech-fan.service 会在每次开机后把风扇设置为 800 Hz、80% PWM；
 - pigpiod.service 只监听本机，避免把控制接口暴露到网络。
 
 #### PyQt6 硬件验收界面
@@ -91,15 +91,20 @@ acceptance_gui.py 提供以下页面：
 
 ### 快速开始
 
-#### 1. 安装依赖并编译
+#### 1. 使用预编译库或重新编译
 
-在 Raspberry Pi OS 64 位系统上：
+仓库已包含在 64 位 Raspberry Pi OS 实机验证过的 ELF64 AArch64 `libuptech.so`，克隆后可以直接使用。安装运行依赖并检查架构：
 
 ~~~bash
 sudo apt update
 sudo apt install -y build-essential python3-pyqt6 python3-pigpio pigpio i2c-tools
-make
 file ./libuptech.so
+~~~
+
+如需从开源实现重新生成二进制，再执行：
+
+~~~bash
+make clean && make
 ~~~
 
 最后一条应显示类似：
@@ -174,7 +179,7 @@ sudo systemctl enable --now pigpiod.service uptech-fan.service
 - ID7/ID8 有刷电机已用短脉冲验证可转动并自动归零；
 - 风扇已验证可稳定满速和中间 PWM 调速。
 
-![OpenLibUptech hardware acceptance GUI](./微信图片_2026-09-22_124111_530.png)
+![OpenLibUptech hardware acceptance GUI](./hardware-acceptance-overview.png)
 
 这张截图展示的是“环境与 ABI”页：它不是原厂镜像截图，而是 64 位移植版本在实际树莓派上的验收结果。
 
@@ -275,7 +280,7 @@ The fan is outside the libuptech.so ABI and is controlled through pigpiod on GPI
 
 - 0% and 100% use steady low/high levels;
 - 1%–99% uses 800 Hz PWM;
-- uptech-fan.service can hold the fan at full speed after boot;
+- uptech-fan.service sets the fan to 800 Hz and 80% PWM after every boot;
 - pigpiod.service listens on localhost only.
 
 #### PyQt6 hardware acceptance panel
@@ -302,15 +307,20 @@ The default state is read-only. ADC/IO outputs, RGB LEDs, the fan, and motors re
 
 ### Quick start
 
-#### 1. Install dependencies and build
+#### 1. Use the prebuilt library or rebuild it
 
-On 64-bit Raspberry Pi OS:
+The repository includes a live-tested ELF64 AArch64 `libuptech.so` for 64-bit Raspberry Pi OS. After cloning, install the runtime dependencies and verify its architecture:
 
 ~~~bash
 sudo apt update
 sudo apt install -y build-essential python3-pyqt6 python3-pigpio pigpio i2c-tools
-make
 file ./libuptech.so
+~~~
+
+To rebuild the binary from the open source implementation:
+
+~~~bash
+make clean && make
 ~~~
 
 The last command should report something similar to:
@@ -385,7 +395,7 @@ Last live verification (2026-09-22): Raspberry Pi 4, 64-bit Raspberry Pi OS, AAr
 - ID7/ID8 brushed motors turning under short pulses and returning to zero;
 - stable full-speed and intermediate PWM fan control.
 
-![OpenLibUptech hardware acceptance GUI](./微信图片_2026-09-22_124111_530.png)
+![OpenLibUptech hardware acceptance GUI](./hardware-acceptance-overview.png)
 
 This screenshot is a real acceptance result from the 64-bit port, not a screenshot of the original vendor image.
 
