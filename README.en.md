@@ -17,7 +17,7 @@ This is not the vendor source and does not redistribute the original ARM32 image
 | ADC / digital IO / RGB | `/dev/spidev1.0`; 9 ADC channels, 8 IO channels, 2 RGB LEDs |
 | MPU6500 | `/dev/i2c-1`, address `0x68`; raw accelerometer and gyroscope data |
 | Chassis | `/dev/ttyAMA0`, GPIO4 half-duplex direction; brushed motors on IDs 7/8 |
-| Fan | GPIO18 through pigpiod; 800 Hz / 80% PWM after boot |
+| Fan | GPIO18 through pigpiod; CPU-temperature PWM (20%–100% at 800 Hz) with a safe temporary manual override |
 | Acceptance panel | PyQt6 pages for environment, MPU, ADC, IO, RGB, fan, and motors |
 
 ## Quick start
@@ -40,7 +40,8 @@ python3 acceptance_gui.py ./libuptech.so
 - `libuptech.so`: verified AArch64 prebuilt library for Linux ARM64;
 - `acceptance_gui.py`: PyQt6 hardware acceptance panel;
 - `abi_smoke.py` / `live_mpu_test.py`: ABI and read-only MPU checks;
-- `pigpiod.service` / `uptech-fan.service`: local pigpiod and 80% boot-fan services;
+- `uptech_fan_control.py` / `uptech-fan.service`: CPU-temperature fan service and its GPIO18 Socket control interface;
+- `pigpiod.service`: local pigpiod service;
 - `99-uptech-ttyama0.rules`: udev permissions for the chassis UART;
 - `hardware-acceptance-overview.png`: live acceptance screenshot;
 - `requirements-gui.txt`: Python GUI dependencies.
