@@ -17,7 +17,7 @@ OpenLibUptech 是根据原有 32 位系统镜像、Python 封装、ABI 和实机
 | ADC / 数字 IO / RGB | `/dev/spidev1.0`；9 路 ADC、8 路 IO、2 颗 RGB LED |
 | MPU6500 | `/dev/i2c-1`、地址 `0x68`；加速度和陀螺仪原始数据 |
 | 底盘 | `/dev/ttyAMA0`、GPIO4 半双工；ID7/ID8 有刷电机 |
-| 风扇 | GPIO18、pigpiod；开机 800 Hz / 80% PWM |
+| 风扇 | GPIO18、pigpiod；CPU 温度自动 PWM（20%–100%，800 Hz），支持短时安全手动覆盖 |
 | 验收界面 | PyQt6：环境、MPU、ADC、IO、RGB、风扇、电机页面 |
 
 ## 快速开始
@@ -41,7 +41,8 @@ python3 acceptance_gui.py ./libuptech.so
 - `libuptech.so`：已验证的 AArch64 预编译库，仅适用于 Linux ARM64；
 - `acceptance_gui.py`：硬件验收界面；
 - `abi_smoke.py` / `live_mpu_test.py`：ABI 和 MPU 只读验证脚本；
-- `pigpiod.service` / `uptech-fan.service`：本机 pigpiod 和开机 80% 风扇服务；
+- `uptech_fan_control.py` / `uptech-fan.service`：本机 CPU 温控风扇服务和 GPIO18 Socket 控制接口；
+- `pigpiod.service`：本机 pigpiod 服务；
 - `99-uptech-ttyama0.rules`：底盘 UART 的 udev 权限规则；
 - `hardware-acceptance-overview.png`：实机验收截图；
 - `requirements-gui.txt`：Python GUI 依赖。

@@ -115,23 +115,44 @@ sudo usermod -aG dialout,spi,i2c,gpio "$USER"
 安装本机 pigpiod 和风扇服务：
 
 ```bash
+# 首次替换已有服务前保留一个可恢复副本
+sudo cp -a /etc/systemd/system/uptech-fan.service \
+  /etc/systemd/system/uptech-fan.service.bak.$(date +%Y%m%d-%H%M%S)
 sudo install -m 0644 pigpiod.service /etc/systemd/system/pigpiod.service
+sudo install -m 0755 uptech_fan_control.py /usr/local/bin/uptech_fan_control.py
 sudo install -m 0644 uptech-fan.service /etc/systemd/system/uptech-fan.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now pigpiod.service uptech-fan.service
 sudo systemctl restart uptech-fan.service
 ```
 
-风扇服务启动后会把 GPIO18 设置为 800 Hz、PWM 范围 100、占空比 80。可以直接读回：
+如果旧服务文件尚不存在，跳过第一条备份命令即可。新服务启动时先全速转 1 秒，再每 2 秒读取 Raspberry Pi CPU 温度：
+
+| CPU 温度 | 自动占空比 |
+| --- | --- |
+| `<45°C` | 20% |
+| `45–55°C` | 70% |
+| `55–65°C` | 80% |
+| `65–75°C` | 90% |
+| `≥75°C` 或温度读取失败 | 100% |
+
+每个分界点有 2°C 回差，避免温度在临界值附近时风扇反复变速。服务通过 `/run/openlibuptech/fan.sock` 独占 GPIO18；该 Socket 属于 `gpio` 组，模式为 `0660`。可以直接读回 PWM 和服务状态：
 
 ```bash
 systemctl is-active pigpiod.service uptech-fan.service
 pigs pfg 18
 pigs prg 18
 pigs gdc 18
+python3 - <<'PY'
+import json, socket
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+    s.connect("/run/openlibuptech/fan.sock")
+    s.sendall(b'{"command":"status"}\n')
+    print(json.loads(s.recv(4096)))
+PY
 ```
 
-最后三个值应为 `800`、`100`、`80`。这个服务只控制风扇，不属于 `libuptech.so` 的 ABI。
+前三个值应为 `800`、`100` 和当前温度对应的占空比。Socket 响应会显示 `mode`、`temperature_c`、`duty` 和手动租约剩余时间。这个服务只控制风扇，不属于 `libuptech.so` 的 ABI。
 
 ## 6. 先跑只读检查
 
@@ -189,7 +210,9 @@ RGB 页有索引 `0` 和 `1` 两颗 LED：
 
 ### 风扇
 
-风扇页默认输入值是 80%。勾选安全确认后点击“连接本机 pigpiod”，再点击“应用 PWM”。“停止风扇”会把 GPIO18 拉低。开机默认的 80% 则由 `uptech-fan.service` 设置。
+风扇页默认是“自动温控”。点击“检测自动控制器”后会实时显示 CPU 温度、当前占空比和模式。输入期望占空比并勾选安全确认后，点击“手动锁定当前占空比”会立即切换为手动；按钮会变成“更新手动转速”，GUI 每秒续租，因此手动锁定不会被温控覆盖。点击“自动温控”会立即恢复温控曲线；关闭 GUI 或 3 秒未续租也会恢复自动。
+
+“手动停止”会暂时保持 0%，但关闭 GUI 后也会恢复自动。正常部署时 GUI 只经 Socket 请求控制器，绝不会直接与服务竞争 GPIO18。仅在 Socket 完全不存在（服务没有安装）时，页面才会显示 pigpiod 手动兜底；这种兜底没有自动温控，测试完请将风扇设为 0%。
 
 ### 有刷底盘电机
 
@@ -235,9 +258,17 @@ systemctl status serial-getty@ttyAMA0.service --no-pager
 
 先运行 `abi_smoke.py`，再检查用户组和 `ls -l /dev/...` 的权限。ADC 和 IO 共用 SPI 设备，确认没有其他程序长期占用 `/dev/spidev1.0`。
 
-### 风扇没有 80% 或频繁变化
+### 风扇没有自动调速、转速不对或频繁变化
 
-确认 `pigpiod.service` 和 `uptech-fan.service` 都是 active，然后重启风扇服务并读回 `pfg/prg/gdc`。不要同时运行多个会写 GPIO18 的风扇脚本。
+确认 `pigpiod.service` 和 `uptech-fan.service` 都是 active，然后检查服务日志、CPU 温度和 Socket 状态：
+
+```bash
+systemctl status uptech-fan.service --no-pager
+journalctl -u uptech-fan.service -n 50 --no-pager
+cat /sys/class/thermal/thermal_zone0/temp
+```
+
+不要运行其他会直接写 GPIO18 的脚本；自动服务应是唯一写入者。若要临时恢复旧固定 80% 服务，先恢复安装前备份的 service 文件、移除 `/usr/local/bin/uptech_fan_control.py`，再 `daemon-reload` 和重启服务。
 
 ### 温度、LCD 或姿态角在哪里
 
