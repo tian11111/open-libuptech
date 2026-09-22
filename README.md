@@ -91,15 +91,20 @@ acceptance_gui.py 提供以下页面：
 
 ### 快速开始
 
-#### 1. 安装依赖并编译
+#### 1. 使用预编译库或重新编译
 
-在 Raspberry Pi OS 64 位系统上：
+仓库已包含在 64 位 Raspberry Pi OS 实机验证过的 ELF64 AArch64 `libuptech.so`，克隆后可以直接使用。安装运行依赖并检查架构：
 
 ~~~bash
 sudo apt update
 sudo apt install -y build-essential python3-pyqt6 python3-pigpio pigpio i2c-tools
-make
 file ./libuptech.so
+~~~
+
+如需从开源实现重新生成二进制，再执行：
+
+~~~bash
+make clean && make
 ~~~
 
 最后一条应显示类似：
@@ -302,15 +307,20 @@ The default state is read-only. ADC/IO outputs, RGB LEDs, the fan, and motors re
 
 ### Quick start
 
-#### 1. Install dependencies and build
+#### 1. Use the prebuilt library or rebuild it
 
-On 64-bit Raspberry Pi OS:
+The repository includes a live-tested ELF64 AArch64 `libuptech.so` for 64-bit Raspberry Pi OS. After cloning, install the runtime dependencies and verify its architecture:
 
 ~~~bash
 sudo apt update
 sudo apt install -y build-essential python3-pyqt6 python3-pigpio pigpio i2c-tools
-make
 file ./libuptech.so
+~~~
+
+To rebuild the binary from the open source implementation:
+
+~~~bash
+make clean && make
 ~~~
 
 The last command should report something similar to:

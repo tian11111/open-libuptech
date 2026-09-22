@@ -29,6 +29,7 @@ try:
         QApplication,
         QCheckBox,
         QComboBox,
+        QColorDialog,
         QFileDialog,
         QFormLayout,
         QGridLayout,
@@ -43,6 +44,7 @@ try:
         QPushButton,
         QSpinBox,
         QSplitter,
+        QSizePolicy,
         QTableWidget,
         QTableWidgetItem,
         QTabWidget,
@@ -408,15 +410,33 @@ class AcceptanceWindow(QMainWindow):
         self.adc_table = QTableWidget(9, 2)
         self.adc_table.setHorizontalHeaderLabels(["通道", "原始值"])
         self.adc_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.adc_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.adc_table.verticalHeader().setVisible(False)
+        self.adc_table.setMinimumHeight(420)
+        self.adc_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        adc_font = QFont(self.adc_table.font())
+        adc_font.setPointSize(16)
+        self.adc_table.setFont(adc_font)
+        adc_header_font = QFont(self.adc_table.horizontalHeader().font())
+        adc_header_font.setPointSize(13)
+        adc_header_font.setBold(True)
+        self.adc_table.horizontalHeader().setFont(adc_header_font)
         for index in range(9):
-            self.adc_table.setItem(index, 0, QTableWidgetItem(f"ADC{index}"))
-            self.adc_table.setItem(index, 1, QTableWidgetItem("—"))
-        layout.addWidget(self.adc_table)
+            channel_item = QTableWidgetItem(f"ADC{index}")
+            value_item = QTableWidgetItem("—")
+            channel_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.adc_table.setItem(index, 0, channel_item)
+            self.adc_table.setItem(index, 1, value_item)
+        layout.addWidget(self.adc_table, 1)
 
         self.power_value = QLabel("板载电源电压原始值：—")
+        power_font = QFont(self.power_value.font())
+        power_font.setPointSize(15)
+        power_font.setBold(True)
+        self.power_value.setFont(power_font)
+        self.power_value.setStyleSheet("padding: 8px;")
         layout.addWidget(self.power_value)
-        layout.addStretch(1)
         return page
 
     def _build_io_tab(self) -> QWidget:
@@ -495,13 +515,25 @@ class AcceptanceWindow(QMainWindow):
         self.led_index = QSpinBox()
         self.led_index.setRange(0, 1)
         self.led_color = QLineEdit("0x000000")
+        self.led_color.setReadOnly(True)
+        self.led_color.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.led_color.setMinimumWidth(140)
+        self.led_color_picker = QPushButton("选择颜色…")
+        self.led_color_picker.setMinimumHeight(42)
+        self.led_color_picker.clicked.connect(self.choose_led_color)
         self.led_button = QPushButton("写 RGB 颜色")
         self.led_button.clicked.connect(self.write_led)
+        color_row = QWidget()
+        color_layout = QHBoxLayout(color_row)
+        color_layout.setContentsMargins(0, 0, 0, 0)
+        color_layout.addWidget(self.led_color)
+        color_layout.addWidget(self.led_color_picker, 1)
         form.addRow("LED 索引", self.led_index)
-        form.addRow("24 位 RGB", self.led_color)
+        form.addRow("颜色", color_row)
         form.addRow("", self.led_button)
         layout.addWidget(controls)
         layout.addStretch(1)
+        self._set_led_color(QColor("#000000"))
         self._update_adc_write_controls()
         return page
 
@@ -897,6 +929,28 @@ class AcceptanceWindow(QMainWindow):
         call = self._call("adc_io_Set", self.io_channel.value(), self.io_level.currentIndex())
         if call:
             self.record("adc.write_level", "通过" if call.result == 0 else "失败", call.error_text, call)
+
+    def _set_led_color(self, color: QColor) -> None:
+        value = (color.red() << 16) | (color.green() << 8) | color.blue()
+        rgb_text = f"0x{value:06X}"
+        self.led_color.setText(rgb_text)
+        brightness = color.red() * 299 + color.green() * 587 + color.blue() * 114
+        text_color = "#ffffff" if brightness < 128000 else "#111827"
+        self.led_color_picker.setText(f"{rgb_text}  ·  选择颜色…")
+        self.led_color_picker.setStyleSheet(
+            f"background-color: {color.name()}; color: {text_color}; "
+            "font-weight: 600; border: 1px solid #6b7280; padding: 8px 14px;"
+        )
+
+    def choose_led_color(self) -> None:
+        try:
+            current_value = int(self.led_color.text().strip(), 0)
+        except ValueError:
+            current_value = 0
+        current = QColor(f"#{current_value & 0xFFFFFF:06X}")
+        selected = QColorDialog.getColor(current, self, "选择 RGB LED 颜色")
+        if selected.isValid():
+            self._set_led_color(selected)
 
     def write_led(self) -> None:
         if not self._ensure_adc_write():
