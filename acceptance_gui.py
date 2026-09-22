@@ -568,7 +568,7 @@ class AcceptanceWindow(QMainWindow):
         layout = QVBoxLayout(page)
         info = QLabel(
             "默认由后台服务按 CPU 温度自动控制 GPIO18：<45°C 为 20%，之后每 10°C 增加 10%，"
-            "75°C 及以上为 100%。手动模式只在本窗口保持活动；关闭窗口或 3 秒无刷新会恢复自动。"
+            "75°C 及以上为 100%。手动锁定只在本窗口保持活动；关闭窗口或 3 秒无刷新会恢复自动。"
         )
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -586,11 +586,9 @@ class AcceptanceWindow(QMainWindow):
         self.fan_fallback_note.setStyleSheet("color: #6b7280;")
         layout.addWidget(self.fan_fallback_note)
         form = QFormLayout()
-        self.fan_mode = QComboBox()
-        self.fan_mode.addItem("自动（CPU 温度）", "auto")
-        self.fan_mode.addItem("手动（仅本窗口）", "manual")
-        self.fan_mode.currentIndexChanged.connect(self.set_fan_mode)
-        form.addRow("控制模式", self.fan_mode)
+        self.fan_mode_label = QLabel("当前模式：自动温控")
+        self.fan_mode_label.setStyleSheet("font-weight: 700; color: #15803d;")
+        form.addRow("当前模式", self.fan_mode_label)
         self.fan_unlock = QCheckBox("允许风扇转动")
         self.fan_unlock.toggled.connect(self.toggle_fan_unlock)
         layout.addWidget(self.fan_unlock)
@@ -600,12 +598,15 @@ class AcceptanceWindow(QMainWindow):
         form.addRow("占空比 (%)", self.fan_duty)
         layout.addLayout(form)
         buttons = QHBoxLayout()
-        self.fan_apply_button = QPushButton("应用手动 PWM")
-        self.fan_apply_button.clicked.connect(self.apply_fan)
+        self.fan_auto_button = QPushButton("自动温控")
+        self.fan_auto_button.clicked.connect(self.set_fan_auto)
+        self.fan_manual_button = QPushButton("手动锁定当前占空比")
+        self.fan_manual_button.clicked.connect(self.apply_fan)
         self.fan_stop_button = QPushButton("手动停止（关闭窗口后恢复自动）")
         self.fan_stop_button.setStyleSheet("font-weight: 700;")
         self.fan_stop_button.clicked.connect(self.stop_fan)
-        buttons.addWidget(self.fan_apply_button)
+        buttons.addWidget(self.fan_auto_button)
+        buttons.addWidget(self.fan_manual_button)
         buttons.addWidget(self.fan_stop_button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
@@ -1114,9 +1115,14 @@ class AcceptanceWindow(QMainWindow):
         )
 
     def _update_fan_controls(self) -> None:
-        manual = self.fan_mode.currentData() == "manual"
-        self.fan_duty.setEnabled(manual)
-        self.fan_apply_button.setEnabled(manual)
+        if self.fan_manual_session:
+            self.fan_mode_label.setText("当前模式：手动锁定（GUI 正在续租）")
+            self.fan_mode_label.setStyleSheet("font-weight: 700; color: #b45309;")
+            self.fan_manual_button.setText("更新手动转速")
+        else:
+            self.fan_mode_label.setText("当前模式：自动温控")
+            self.fan_mode_label.setStyleSheet("font-weight: 700; color: #15803d;")
+            self.fan_manual_button.setText("手动锁定当前占空比")
         if not self.fan_controller_active:
             if Path(self.fan_socket_path).exists():
                 self.fan_fallback_note.setText(
@@ -1167,18 +1173,15 @@ class AcceptanceWindow(QMainWindow):
         self.record("fan.connect", "通过", "pigpiod localhost:8888（无自动控制器时的手动兜底）")
         return True
 
-    def set_fan_mode(self, _index: int = -1) -> None:
+    def set_fan_auto(self) -> None:
         self.fan_manual_session = False
-        if self.fan_mode.currentData() == "auto":
-            if self.connect_fan() and self.fan_controller_active:
-                status = self._fan_controller_request("auto")
-                if status is not None:
-                    self._display_fan_controller_status(status)
-                    self.record("fan.auto", "通过", "已恢复 CPU 温度自动控制")
-            elif not self.fan_controller_active:
-                self.fan_status.setText("自动控制器不可用；直连 pigpiod 兜底没有自动模式")
-        else:
-            self.fan_status.setText("手动模式待应用；后台仍保持原来的自动控制")
+        if self.connect_fan() and self.fan_controller_active:
+            status = self._fan_controller_request("auto")
+            if status is not None:
+                self._display_fan_controller_status(status)
+                self.record("fan.auto", "通过", "已恢复 CPU 温度自动控制")
+        elif not self.fan_controller_active:
+            self.fan_status.setText("自动控制器不可用；直连 pigpiod 兜底没有自动模式")
         self._update_fan_controls()
 
     def toggle_fan_unlock(self, enabled: bool) -> None:
@@ -1190,8 +1193,6 @@ class AcceptanceWindow(QMainWindow):
                 self.fan_unlock.blockSignals(False)
 
     def apply_fan(self) -> None:
-        if self.fan_mode.currentData() != "manual":
-            return
         duty = self.fan_duty.value()
         if duty > 0 and not self.fan_unlock.isChecked():
             QMessageBox.warning(self, "风扇已锁定", "请先确认叶片安全并勾选允许风扇转动。")
@@ -1206,6 +1207,7 @@ class AcceptanceWindow(QMainWindow):
             self.fan_manual_session = True
             self.fan_timer.start()
             self._display_fan_controller_status(status)
+            self._update_fan_controls()
             self.record("fan.pwm", "通过", f"控制器手动 GPIO18 / 800 Hz / {duty}%")
             return
         if duty == 0:
@@ -1223,17 +1225,15 @@ class AcceptanceWindow(QMainWindow):
         passed = result == 0
         if passed:
             self.fan_output_owned = True
+            self.fan_manual_session = True
         self.fan_status.setText(detail if passed else f"pigpio 错误 {result}")
+        self._update_fan_controls()
         self.record("fan.pwm", "通过" if passed else "失败", self.fan_status.text())
 
     def stop_fan(self) -> None:
         if not self.connect_fan():
             return
         if self.fan_controller_active:
-            self.fan_mode.blockSignals(True)
-            self.fan_mode.setCurrentIndex(1)
-            self.fan_mode.blockSignals(False)
-            self._update_fan_controls()
             status = self._fan_controller_request("manual", 0)
             if status is None:
                 self.record("fan.stop", "失败", "自动控制器拒绝停止请求")
@@ -1241,18 +1241,27 @@ class AcceptanceWindow(QMainWindow):
             self.fan_manual_session = True
             self.fan_timer.start()
             self._display_fan_controller_status(status)
+            self._update_fan_controls()
             self.record("fan.stop", "通过", "控制器手动 0%；关闭窗口或租约到期后恢复自动")
             return
         result = int(self.fan_pi.write(18, 0))
         if result == 0:
             self.fan_output_owned = True
+            self.fan_manual_session = True
         self.fan_status.setText("GPIO18 持续低电平 / 0%（已停止）")
+        self._update_fan_controls()
         self.record("fan.stop", "通过" if result == 0 else "失败", f"pigpio result={result}")
 
     def refresh_fan_status(self) -> None:
         if not self.fan_controller_active:
             return
-        status = self._fan_controller_request("status", quiet=True)
+        if self.fan_manual_session:
+            status = self._fan_controller_request("keepalive", quiet=True)
+            if status is None:
+                self.fan_manual_session = False
+                status = self._fan_controller_request("status", quiet=True)
+        else:
+            status = self._fan_controller_request("status", quiet=True)
         if status is None:
             self.fan_controller_active = False
             self.fan_manual_session = False
@@ -1261,13 +1270,9 @@ class AcceptanceWindow(QMainWindow):
             self._update_fan_controls()
             return
         self._display_fan_controller_status(status)
-        if self.fan_manual_session:
-            if status.get("mode") != "manual":
-                self.fan_manual_session = False
-                return
-            refreshed = self._fan_controller_request("keepalive", quiet=True)
-            if refreshed is not None:
-                self._display_fan_controller_status(refreshed)
+        if self.fan_manual_session and status.get("mode") != "manual":
+            self.fan_manual_session = False
+        self._update_fan_controls()
 
     def open_cds(self) -> bool:
         call = self._call("cds_servo_open")
