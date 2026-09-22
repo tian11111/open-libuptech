@@ -39,6 +39,11 @@ GPIO4, which this library needs for CDS half-duplex direction control.
 Do not use the default `spi1-3cs` overlay with the fan: it claims GPIO18 as
 SPI1 CS0, while the legacy Python driver uses GPIO18 for hardware PWM.
 
+The motor UART must not also be a Linux login console. Remove
+`console=serial0,115200` from `/boot/firmware/cmdline.txt`, disable
+`serial-getty@ttyAMA0.service`, and install `99-uptech-ttyama0.rules` under
+`/etc/udev/rules.d/` so members of `dialout` retain read/write access.
+
 The legacy MBri `uptech.py` also requires the Python `pigpio` client and a
 running `pigpiod`. The accompanying `pigpiod.service` runs the daemon in the
 foreground under systemd and restricts its socket to localhost. Its fan setup
@@ -88,8 +93,11 @@ the CDS bus open path, and the local pigpiod connection. It does not request
 position feedback because the tested brushed chassis motors have no encoders.
 It does not start the fan or send nonzero motor speed. ADC/IO writes, fan PWM,
 and brushed chassis motor commands each have an explicit safety unlock. Motor
-tests are limited to `-100..100`, use a `100..1000 ms` pulse, automatically send
-zero speed, and always expose an emergency-stop button.
+speed inputs use `0..1024`; low values may be too slow to start the motors, and
+the protocol maps input `1024` to its maximum effective magnitude of `1023`.
+Tests use a `100..1000 ms` pulse, automatically send zero speed, and always
+expose an emergency-stop button. The right-wheel direction is inverted by the
+GUI so both fields remain non-negative logical speed inputs.
 
 The `cds_servo_*` prefix is retained only because it is part of the vendor ABI.
 In the acceptance panel IDs 7 and 8 are described as the brushed chassis motor

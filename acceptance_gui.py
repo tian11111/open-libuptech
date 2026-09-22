@@ -510,17 +510,36 @@ class AcceptanceWindow(QMainWindow):
         command_group = QGroupBox("短脉冲验收（自动归零）")
         form = QFormLayout(command_group)
         self.left_speed = QSpinBox()
-        self.left_speed.setRange(-100, 100)
+        self.left_speed.setRange(0, 1024)
         self.left_speed.setValue(0)
         self.right_speed = QSpinBox()
-        self.right_speed.setRange(-100, 100)
+        self.right_speed.setRange(0, 1024)
         self.right_speed.setValue(0)
         self.pulse_ms = QSpinBox()
         self.pulse_ms.setRange(100, 1000)
         self.pulse_ms.setSingleStep(100)
         self.pulse_ms.setValue(300)
-        form.addRow("左轮逻辑速度", self.left_speed)
-        form.addRow("右轮逻辑速度", self.right_speed)
+
+        left_speed_row = QWidget()
+        left_speed_layout = QHBoxLayout(left_speed_row)
+        left_speed_layout.setContentsMargins(0, 0, 0, 0)
+        left_speed_layout.addWidget(self.left_speed)
+        left_speed_layout.addWidget(QLabel("速度太慢时电机可能不转"))
+        left_speed_layout.addStretch(1)
+
+        right_speed_row = QWidget()
+        right_speed_layout = QHBoxLayout(right_speed_row)
+        right_speed_layout.setContentsMargins(0, 0, 0, 0)
+        right_speed_layout.addWidget(self.right_speed)
+        right_speed_layout.addWidget(QLabel("速度太慢时电机可能不转"))
+        right_speed_layout.addStretch(1)
+
+        form.addRow("左轮速度 (0–1024)", left_speed_row)
+        form.addRow("右轮速度 (0–1024)", right_speed_row)
+        protocol_note = QLabel("输入 1024 时按底层协议最大有效值 1023 下发；右轮方向由程序自动取反。")
+        protocol_note.setStyleSheet("color: #6b7280;")
+        protocol_note.setWordWrap(True)
+        form.addRow("", protocol_note)
         form.addRow("持续时间 (ms)", self.pulse_ms)
         layout.addWidget(command_group)
 
@@ -944,11 +963,13 @@ class AcceptanceWindow(QMainWindow):
             return
         if not self.cds_opened and not self.open_cds():
             return
-        left_speed = self.left_speed.value()
-        right_speed = self.right_speed.value()
-        if left_speed == 0 and right_speed == 0:
+        requested_left_speed = self.left_speed.value()
+        requested_right_speed = self.right_speed.value()
+        if requested_left_speed == 0 and requested_right_speed == 0:
             QMessageBox.information(self, "速度为零", "请设置至少一个非零速度，或直接使用急停。")
             return
+        left_speed = min(requested_left_speed, 1023)
+        right_speed = min(requested_right_speed, 1023)
         self.motor_pulse_active = True
         self._update_motor_controls()
         left = self._call("cds_servo_SetSpeed", 7, left_speed)
@@ -957,7 +978,9 @@ class AcceptanceWindow(QMainWindow):
         self.record(
             "motor.pulse_start",
             "通过" if passed else "失败",
-            f"left={left_speed}, right={right_speed}, duration={self.pulse_ms.value()}ms",
+            f"left={left_speed} (input={requested_left_speed}), "
+            f"right={right_speed} (input={requested_right_speed}), "
+            f"duration={self.pulse_ms.value()}ms",
         )
         if not passed:
             self.emergency_stop()
@@ -1017,7 +1040,8 @@ class AcceptanceWindow(QMainWindow):
                 "adc_write_unlocked": self.adc_write_unlock.isChecked(),
                 "fan_unlocked": self.fan_unlock.isChecked(),
                 "motor_unlocked": self.motor_unlock.isChecked(),
-                "motor_speed_limit": 100,
+                "motor_speed_input_limit": 1024,
+                "motor_speed_protocol_limit": 1023,
                 "motor_pulse_limit_ms": 1000,
             },
         }
