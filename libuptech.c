@@ -111,8 +111,11 @@ int ADC_GetAll(uint16_t *values) {
         return -1;
     }
     for (size_t index = 0; index < 10; ++index) {
-        values[index] = (uint16_t)(((uint16_t)rx[index * 2 + 1] << 8) |
-                                   rx[index * 2 + 2]);
+        /* The controller returns each 16-bit sample least-significant byte
+           first.  Values 0..8 are external ADC channels; value 9 is the
+           board power-voltage measurement retained by the vendor ABI. */
+        values[index] = (uint16_t)(rx[index * 2 + 1] |
+                                   ((uint16_t)rx[index * 2 + 2] << 8));
     }
     return 0;
 }

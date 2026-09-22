@@ -67,7 +67,8 @@ sudo systemctl enable --now pigpiod.service uptech-fan.service
 Verified on 2026-09-21 on a Raspberry Pi 4 running aarch64/Python 3.13:
 
 - `pyuptech==0.1.6.5` loaded this library and read live MPU6500 data.
-- ADC/IO opened and returned ten ADC channels plus the eight-bit input mask.
+- ADC/IO opened and returned nine external ADC channels, one board-voltage
+  measurement, and the eight-bit digital input mask.
 - The CDS UART and GPIO4 direction line opened and closed successfully; no
   servo movement command was sent.
 

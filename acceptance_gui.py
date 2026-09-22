@@ -397,17 +397,36 @@ class AcceptanceWindow(QMainWindow):
         controls.addStretch(1)
         layout.addLayout(controls)
 
-        self.adc_table = QTableWidget(10, 2)
+        adc_note = QLabel(
+            "板上有 9 路外部 ADC（ADC0–ADC8）；协议返回的第 10 个值是板载电源电压，不是 ADC9。"
+        )
+        adc_note.setWordWrap(True)
+        layout.addWidget(adc_note)
+
+        self.adc_table = QTableWidget(9, 2)
         self.adc_table.setHorizontalHeaderLabels(["通道", "原始值"])
         self.adc_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.adc_table.verticalHeader().setVisible(False)
-        for index in range(10):
+        for index in range(9):
             self.adc_table.setItem(index, 0, QTableWidgetItem(f"ADC{index}"))
             self.adc_table.setItem(index, 1, QTableWidgetItem("—"))
         layout.addWidget(self.adc_table)
 
+        self.power_value = QLabel("板载电源电压原始值：—")
+        layout.addWidget(self.power_value)
+
         self.io_value = QLabel("输入掩码：—    模式掩码：—")
+        self.io_value.setWordWrap(True)
         layout.addWidget(self.io_value)
+
+        self.io_table = QTableWidget(2, 8)
+        self.io_table.setHorizontalHeaderLabels([f"IO{index}" for index in range(8)])
+        self.io_table.setVerticalHeaderLabels(["输入电平", "模式"])
+        self.io_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        for index in range(8):
+            self.io_table.setItem(0, index, QTableWidgetItem("—"))
+            self.io_table.setItem(1, index, QTableWidgetItem("—"))
+        layout.addWidget(self.io_table)
 
         write_group = QGroupBox("IO / LED 写操作（默认锁定）")
         write_layout = QGridLayout(write_group)
@@ -416,7 +435,7 @@ class AcceptanceWindow(QMainWindow):
         self.io_channel = QSpinBox()
         self.io_channel.setRange(0, 7)
         self.io_mode = QComboBox()
-        self.io_mode.addItems(["原始模式位 0", "原始模式位 1"])
+        self.io_mode.addItems(["输入模式 0", "输出模式 1"])
         self.io_level = QComboBox()
         self.io_level.addItems(["低电平 0", "高电平 1"])
         self.io_mode_button = QPushButton("写模式")
@@ -544,7 +563,7 @@ class AcceptanceWindow(QMainWindow):
         layout.addWidget(command_group)
 
         actions = QHBoxLayout()
-        self.motor_mode_button = QPushButton("设置 7/8 为连续转动模式")
+        self.motor_mode_button = QPushButton("仅设置 7/8 连续转动模式（不会启动）")
         self.motor_mode_button.clicked.connect(self.set_motor_mode)
         self.motor_pulse_button = QPushButton("执行短脉冲")
         self.motor_pulse_button.clicked.connect(self.run_motor_pulse)
@@ -770,8 +789,16 @@ class AcceptanceWindow(QMainWindow):
             return False
         passed = values_call.result == 0 and input_call.result >= 0 and mode_call.result == 0
         if passed:
-            for index, value in enumerate(values):
+            for index, value in enumerate(values[:9]):
                 self.adc_table.item(index, 1).setText(str(value))
+            self.power_value.setText(f"板载电源电压原始值：{values[9]}")
+            for index in range(8):
+                input_level = (input_call.result >> index) & 1
+                mode_level = (mode.value >> index) & 1
+                self.io_table.item(0, index).setText(f"{input_level}（{'高' if input_level else '低'}）")
+                self.io_table.item(1, index).setText(
+                    "输出 (1)" if mode_level else "输入 (0)"
+                )
             self.io_value.setText(
                 f"输入掩码：0x{input_call.result:02X} ({input_call.result:08b})    "
                 f"模式掩码：0x{mode.value:02X} ({mode.value:08b})"
@@ -956,7 +983,13 @@ class AcceptanceWindow(QMainWindow):
         left = self._call("cds_servo_SetMode", 7, 1)
         right = self._call("cds_servo_SetMode", 8, 1)
         passed = bool(left and right and left.result == 0 and right.result == 0)
-        self.record("motor.mode", "通过" if passed else "失败", "ID7/ID8 连续转动模式")
+        self.record(
+            "motor.mode",
+            "通过" if passed else "失败",
+            "ID7/ID8 连续转动模式；仅设置模式，不发送速度",
+        )
+        if passed:
+            self.statusBar().showMessage("模式已设置；需点击“执行短脉冲”才会转动", 5000)
 
     def run_motor_pulse(self) -> None:
         if not self.motor_unlock.isChecked() or self.motor_pulse_active:
