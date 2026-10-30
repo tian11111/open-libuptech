@@ -347,7 +347,8 @@ class AcceptanceWindow(QMainWindow):
 
         note = QLabel(
             "只读验收会检测 MPU、读取 ADC/IO、打开底盘总线并连接 pigpiod；"
-            "不会启动风扇，也不会向电机发送非零速度。"
+            "打开总线时会配置 GPIO4。验收不启动风扇，也不发送非零电机速度；"
+            "退出或急停可能向 ID7/8 发送合法零速帧。"
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -384,12 +385,23 @@ class AcceptanceWindow(QMainWindow):
         form.addRow("配置量程", self.fsr_value)
         layout.addWidget(values)
 
-        unsupported = QLabel(
-            "姿态角 / DMP：当前兼容库明确返回 ENOTSUP；零值不能作为有效姿态参与验收。"
+        attitude = QGroupBox("软件姿态角 (°)")
+        attitude_form = QFormLayout(attitude)
+        self.pitch_angle = QLabel("—")
+        self.roll_angle = QLabel("—")
+        self.yaw_angle = QLabel("—")
+        attitude_form.addRow("Pitch", self.pitch_angle)
+        attitude_form.addRow("Roll", self.roll_angle)
+        attitude_form.addRow("Yaw（相对角）", self.yaw_angle)
+        layout.addWidget(attitude)
+
+        attitude_note = QLabel(
+            "姿态角由加速度与陀螺仪互补滤波计算；yaw 没有磁力计基准，会随时间漂移。"
+            "等待首帧和缓存关闭时不会把占位零值当作有效姿态。"
         )
-        unsupported.setStyleSheet("color: #a16207; font-weight: 600;")
-        unsupported.setWordWrap(True)
-        layout.addWidget(unsupported)
+        attitude_note.setStyleSheet("color: #6b7280;")
+        attitude_note.setWordWrap(True)
+        layout.addWidget(attitude_note)
         layout.addStretch(1)
         return page
 
@@ -691,6 +703,11 @@ class AcceptanceWindow(QMainWindow):
         actions.addWidget(emergency)
         actions.addStretch(1)
         layout.addLayout(actions)
+        self.motor_stop_status = QLabel(
+            "停止状态：尚未发送零速；底盘无编码器，需要目视确认停转。"
+        )
+        self.motor_stop_status.setWordWrap(True)
+        layout.addWidget(self.motor_stop_status)
         self._update_motor_controls()
         layout.addStretch(1)
         return page
@@ -858,6 +875,56 @@ class AcceptanceWindow(QMainWindow):
             "通过" if passed else "失败",
             f"accel={list(accel)}, gyro={list(gyro)}" if passed else "读取失败",
         )
+
+        attitude = vector_type()
+        attitude_call = self._call("mpu6500_Get_Attitude", attitude)
+        if attitude_call is None:
+            return False
+        if attitude_call.result == 0:
+            pitch, roll, yaw = (float(value) for value in attitude)
+            self.pitch_angle.setText(f"{pitch:+.2f}")
+            self.roll_angle.setText(f"{roll:+.2f}")
+            self.yaw_angle.setText(f"{yaw:+.2f}")
+            self.record(
+                "mpu.attitude",
+                "通过",
+                f"pitch={pitch:.3f}°, roll={roll:.3f}°, yaw={yaw:.3f}°（相对角）",
+                attitude_call,
+            )
+            self.results["mpu.attitude"].update(
+                {
+                    "values_deg": {"pitch": pitch, "roll": roll, "yaw": yaw},
+                    "yaw_reference": "relative",
+                    "cache_enabled": True,
+                }
+            )
+        else:
+            if attitude_call.err == errno.EAGAIN:
+                angle_text = "等待首帧"
+                state = "等待首帧"
+                detail = "缓存已启用，但采样线程尚未发布首个有效姿态"
+                cache_enabled = True
+            elif attitude_call.err == errno.ENOTSUP:
+                angle_text = "缓存关闭"
+                state = "不支持"
+                detail = "UPTECH_MPU_CACHE_MS=0：缓存关闭，Get_Attitude 返回 ENOTSUP"
+                cache_enabled = False
+            else:
+                angle_text = attitude_call.error_text
+                state = "失败"
+                detail = f"Get_Attitude 失败：{attitude_call.error_text}"
+                cache_enabled = None
+            self.pitch_angle.setText(angle_text)
+            self.roll_angle.setText(angle_text)
+            self.yaw_angle.setText(angle_text)
+            self.record("mpu.attitude", state, detail, attitude_call)
+            self.results["mpu.attitude"].update(
+                {
+                    "values_deg": None,
+                    "yaw_reference": "relative",
+                    "cache_enabled": cache_enabled,
+                }
+            )
         return passed
 
     def open_adc(self) -> bool:
@@ -1366,21 +1433,49 @@ class AcceptanceWindow(QMainWindow):
     def emergency_stop(self, silent: bool = False) -> None:
         self.motor_stop_timer.stop()
         if self.library is not None and self.cds_opened:
-            left = self.library.call("cds_servo_SetSpeed", 7, 0)
-            right = self.library.call("cds_servo_SetSpeed", 8, 0)
-            passed = left.result == 0 and right.result == 0
-            self.record("motor.stop", "通过" if passed else "失败", "ID7=0, ID8=0")
+            passed = True
+            details = []
+            # A failure on one wheel must never prevent the other zero frame.
+            for wheel, side in ((7, "left"), (8, "right")):
+                key = f"motor.stop.{side}"
+                try:
+                    call = self.library.call("cds_servo_SetSpeed", wheel, 0)
+                except Exception as exc:
+                    passed = False
+                    detail = f"ID{wheel}=0 调用异常: {exc}"
+                    self.record(key, "失败", detail)
+                else:
+                    ok = call.result == 0
+                    passed = passed and ok
+                    detail = f"ID{wheel}=0 result={call.result}, errno={call.err} {call.error_text}"
+                    self.record(key, "通过" if ok else "失败", detail, call)
+                details.append(detail)
+            self.record("motor.stop", "通过" if passed else "失败", "; ".join(details))
+            if passed:
+                message = "零速帧已发送；无停转反馈，请目视确认两轮停止。"
+                self.motor_stop_status.setStyleSheet("color: #a16207;")
+            else:
+                message = "停止发送失败，停转未确认！请切断电机电源；检查下方逐轮日志。"
+                self.motor_stop_status.setStyleSheet("color: #b91c1c; font-weight: 700;")
+                self.motor_unlock.blockSignals(True)
+                self.motor_unlock.setChecked(False)
+                self.motor_unlock.blockSignals(False)
+            self.motor_stop_status.setText(message)
+            if not silent or not passed:
+                self.statusBar().showMessage(message)
         self.motor_pulse_active = False
         self._update_motor_controls()
-        if not silent:
-            self.statusBar().showMessage("底盘电机已发送零速命令", 3000)
 
     def run_read_only_suite(self) -> None:
         if self.library is None:
             self.load_library()
         if self.library is None:
             return
-        self.log("suite", "开始只读验收；不启动风扇、不发送非零电机速度")
+        self.log(
+            "suite",
+            "开始只读验收；不启动风扇、不发送非零电机速度；打开总线时会配置 GPIO4，"
+            "退出或急停可能发送合法零速帧",
+        )
         self.refresh_environment()
         QApplication.processEvents()
         self.detect_mpu()
@@ -1393,7 +1488,6 @@ class AcceptanceWindow(QMainWindow):
         self.open_cds()
         self.record("motor.position_read", "不支持", "底盘电机无编码器，跳过位置读取")
         self.connect_fan()
-        self.record("mpu.attitude", "不支持", "兼容库当前返回 ENOTSUP")
         self.log("suite", "只读验收完成")
 
     def export_report(self) -> None:
