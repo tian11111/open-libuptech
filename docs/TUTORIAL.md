@@ -65,7 +65,15 @@ make
 file ./libuptech.so
 ```
 
-这条 `make` 会覆盖当前目录的 `.so`，所以如果要保留预编译文件，请先复制一份到其他目录。
+这条 `make` 会覆盖当前目录的 `.so`，所以如果要保留预编译文件，请先复制一份到其他目录。Makefile 显式链接 `-lm`，软件姿态滤波不依赖 Python 宿主预先加载数学库；这不会改变导出 ABI。
+
+默认的无设备测试只检查风扇控制：
+
+```bash
+make test
+```
+
+硬件或 PTY 验证使用显式命令，详见第 6 节；它们不属于默认 `make test`。
 
 ## 4. 配置 Raspberry Pi 总线
 
@@ -156,7 +164,7 @@ PY
 
 ## 6. 先跑只读检查
 
-这些命令不会给 ADC/IO、风扇或电机发送动作命令：
+这些命令不会给 ADC/IO、风扇或执行器发送动作命令：
 
 ```bash
 file ./libuptech.so
@@ -173,7 +181,25 @@ MPU6500 兼容器件通常应在 `0x68` 出现，WHO_AM_I 常见返回 `0x70`。
 python3 live_mpu_test.py ./libuptech.so
 ```
 
-脚本最后会报告姿态角接口 `ENOTSUP`，这是当前已知边界，不代表加速度和陀螺仪读取失败。
+`live_mpu_test.py` 会写 MPU 初始化寄存器。`_verify_mpu.py` 会读取并切换 FSR 量程，并在 `try/finally` 中恢复原值；它读取软件姿态角，不是 DMP。
+
+UART 回归可拆分运行。以下 PTY 协议测试不写真实 `/dev/ttyAMA0`，但仍会通过 `cds_servo_open()` 配置并翻转真实 GPIO4：
+
+```bash
+sudo systemctl stop uptech-fan.service
+UPTECH_LIB=./libuptech.so python3 -m unittest tests.test_servo_protocol
+sudo systemctl start uptech-fan.service
+```
+
+不要从这里的停服命令推断 PTY 测试会独占风扇；停服是为了把 GPIO/服务副作用显式隔离，初测完成后恢复。若只在未接硬件的兼容环境执行，无法证明 GPIO4 与真实总线的行为。
+
+真实 UART 时序验证必须显式运行，并让两台电机保持零速；该命令会配置 GPIO4 并发送真实合法总线帧：
+
+```bash
+python3 _verify_servo_timing.py ./libuptech.so
+```
+
+`_verify_servo_timing.py` 测的是零速帧发送路径和 1 ms 帧间隔，不能替代真实非零电机控制或机械负载验收。仓库报告中的历史 3.1 µs / 890 µs 和 8 ms / 90 µs 数据来自旧轮实测；本轮修改尚未重测。
 
 ## 7. 启动验收界面
 
@@ -185,7 +211,7 @@ python3 acceptance_gui.py ./libuptech.so
 
 界面没有安装成 systemd 服务，需要在有图形桌面会话的终端中启动。通过 SSH 启动时，必须自行设置与本地桌面一致的 `DISPLAY` / `WAYLAND_DISPLAY`；最简单的方式是在树莓派显示器上的终端运行。
 
-界面默认只读。打开窗口不会自动启动风扇，也不会给底盘发送非零速度。
+界面默认只读。打开窗口不会自动启动风扇，也不会给底盘发送非零速度。点“运行只读验收”会打开底盘总线，从而配置 GPIO4；它读取 ADC/IO、MPU 和风扇状态，但不会发送非零电机速度。退出窗口或触发急停时，若底盘总线已打开，会发送 ID7/8 的合法零速帧。仅启动窗口、不点该套件且不打开电机会话时不发送电机命令。
 
 ## 8. 各页面怎么验收
 
@@ -220,6 +246,12 @@ RGB 页有索引 `0` 和 `1` 两颗 LED：
 
 底盘没有编码器，因此界面不会把位置读数当作有效反馈。
 
+### MPU6500
+
+MPU 页显示加速度、角速度、配置量程，以及 `Pitch`、`Roll`、`Yaw` 三个软件姿态角。成功后 GUI 显示数值，JSON 的 `mpu.attitude` 记录 `values_deg` 和相对 yaw 标记。等待首帧时显示“等待首帧”并记录 `EAGAIN`；设置 `UPTECH_MPU_CACHE_MS=0` 时显示“缓存关闭”并记录 `ENOTSUP`。这两种失败状态都不会把占位零值写入有效角度。
+
+姿态是软件互补滤波，不是原厂 DMP；yaw 无磁力计绝对参考，会漂移。用户已完成倾角及 yaw 观察测试，未采集量化精度指标。
+
 ## 9. 硬件节点和协议摘要
 
 | 功能 | 节点 / 参数 |
@@ -238,6 +270,26 @@ lib = ctypes.CDLL("./libuptech.so", use_errno=True)
 lib.mpu6500_open.restype = ctypes.c_int
 print("MPU open:", lib.mpu6500_open())
 ```
+
+MPU 默认每 10 ms 缓存一次加速度和陀螺仪，并在软件中计算 `[pitch, roll, yaw]` 度。设 `UPTECH_MPU_CACHE_MS=0` 会关闭缓存：`Get_Accel` / `Get_Gyro` 改为同步 I²C 读取，`Get_Attitude` 返回 `ENOTSUP`。缓存开启但尚无首帧时返回 `EAGAIN`。
+
+UART 发送使用有界 `TIOCOUTQ` 等待，不再调用 `tcdrain()`；队列清空后继续保持 GPIO4 发送态一整帧线上时间加 20 µs，9 字节速度帧至少再等 110 µs。一次失败会重试完整发送，最多 3 次，成功后保持 1 ms 帧间隔。`ReadReg` 校验 `FF FF`、ID、精确 `count + 6` 字节总数以及 `length == count + 2` 字段。用户已确认停机功能恢复正常并完成所列功能测试；真实 GPIO4/TX 波形未归档。
+
+导出的 45 个函数中保留 18 个 LCD/UGUI 入口：17 个返回 `ENOTSUP`，`lcd_close` 返回 `0`。FUNC 数量是 45，不代表整个库完全 stripped；当前检出 `.so` 是旧产物，需由主流程在 Pi 上重建。
+
+动态库生命周期：调用方必须先停止所有使用该库的 API 线程，再调用 `dlclose()`。库会先停止并 join 采样线程，再关闭设备 fd。`pthread_atfork` 在 fork 前锁住库内互斥量，父子进程分别释放；子进程清空旧缓存，调用 `mpu6500_open()` 后可重建采样线程。Pi 模拟 I²C 回归已验证 fork 时另一线程持有 I²C 锁的场景；这不保证父子同时操作同一真实总线的协议安全，应用推荐 fork 后立即 exec。
+
+### 本轮最小回归
+
+在 Linux/Pi 项目目录执行 `make test`，仅运行无设备风扇、MPU/UART 和可选 PyQt6 模拟测试。模拟测试覆盖缓存比例、四个并发调用线程、姿态轴向/度数、fork 锁继承、采样线程退出、FIFO 未空时的发送方向保持，以及两轮短脉冲归零和逐轮失败提示；未安装 PyQt6 时跳过 GUI 测试。真实串口协议测试需显式运行：
+
+```sh
+UPTECH_LIB=./libuptech.so python3 -m unittest discover -s tests -p test_servo_protocol.py -v
+python3 _verify_mpu.py ./libuptech.so
+UPTECH_MPU_CACHE_MS=0 python3 _verify_mpu.py ./libuptech.so
+```
+
+PTY 测试仍会翻转 GPIO4；MPU 脚本会切换量程并恢复初始值。这些命令不向真实电机 UART 发帧。2026-10-30 本轮结果、候选哈希与未完成的硬件项目见 `OPTIMIZATION-VALIDATION.md`。
 
 ## 10. 故障排查
 
@@ -272,7 +324,7 @@ cat /sys/class/thermal/thermal_zone0/temp
 
 ### 温度、LCD 或姿态角在哪里
 
-MPU6500 有芯片内部温度寄存器，但当前兼容 ABI 和 GUI 没有温度函数。当前没有确认独立的外部温度传感器。LCD/UGUI 只保留符号桩；DMP 姿态角返回 `ENOTSUP`。
+MPU6500 有芯片内部温度寄存器，但当前兼容 ABI 和 GUI 没有温度函数。当前没有确认独立的外部温度传感器。LCD/UGUI 的 18 个入口保留为 ABI 桩：17 个返回 `ENOTSUP`，`lcd_close` 返回 `0`。软件姿态角可用于观察姿态变化，不是 DMP，yaw 会漂移；物理观察测试已由用户完成，尚无量化精度指标。
 
 ## 11. 回滚
 

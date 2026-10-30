@@ -17,14 +17,21 @@ required = [
     "adc_led_set",
     "cds_servo_open",
     "cds_servo_close",
+    "cds_servo_SendFrame",
+    "cds_servo_ReadReg",
     "cds_servo_SetMode",
     "cds_servo_SetAngle",
     "cds_servo_SetSpeed",
     "cds_servo_GetPos",
+    "mpu6500_open",
     "mpu6500_dmp_init",
     "mpu6500_Get_Accel",
     "mpu6500_Get_Gyro",
     "mpu6500_Get_Attitude",
+    "mpu_get_gyro_fsr",
+    "mpu_get_accel_fsr",
+    "mpu_set_gyro_fsr",
+    "mpu_set_accel_fsr",
 ]
 
 missing = [name for name in required if not hasattr(library, name)]
