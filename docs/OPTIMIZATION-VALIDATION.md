@@ -28,7 +28,7 @@
 | PyQt6 实机只读检查 | AArch64 Pi 使用 Qt offscreen 渲染七页；MPU、ADC、IO、风扇状态可读取；所有写入解锁均关闭 |
 | GUI 缓存关闭状态 | MPU 姿态显示“缓存关闭”，JSON 记录 `ENOTSUP` 且 `values_deg=null` |
 
-## 候选和部署边界
+## 初版候选和部署边界（历史记录）
 
 Pi 候选路径为 `~/openlib-work/libuptech.so`，SHA-256：
 
@@ -36,7 +36,7 @@ Pi 候选路径为 `~/openlib-work/libuptech.so`，SHA-256：
 47844441d1ddfe5e80ca5ce277655edec6ad731597e39627c20c35359989ee32
 ```
 
-仓库 `libuptech.so` 仍是旧产物，SHA-256 为 `489b28caa1aa9f4ae363d0cb7878a215c33a6c648e18c4b4b869c891c3b6bbe5`。实机安装目录 `~/libuptech64` 未修改。候选尚未部署。
+初版验证时，仓库 `libuptech.so` 仍是旧产物，SHA-256 为 `489b28caa1aa9f4ae363d0cb7878a215c33a6c648e18c4b4b869c891c3b6bbe5`。实机安装目录 `~/libuptech64` 未修改。候选尚未部署。
 
 本轮没有发送真实 UART 合法零速帧，也没有做非零电机负载或物理倾斜方向/精度验收。`TIOCOUTQ` 表示驱动报告的输出队列状态；硬件 FIFO 最后字节时序和 20 µs 保护时间仍需后续硬件测量。PTY 协议测试会配置并翻转 GPIO4，但不写 `/dev/ttyAMA0`。只读 GUI 检查跳过打开 CDS 总线，避免退出时的急停逻辑发送零速帧。
 
@@ -66,7 +66,7 @@ Pi 候选路径为 `~/openlib-work/libuptech.so`，SHA-256：
 - 修复后队列清空再等完整帧线上时间加 20 µs；9 字节帧保持至少 110 µs。仍有三次有界发送重试和成功后的 1 ms 帧间隔。没有把重复发送零速或改方向位作为补丁。
 - GUI 对每轮分别记录 result/errno；即使左轮调用抛异常仍尝试右轮零速。失败显示红色警告并重新锁定脉冲；成功仅表示“零速帧已发送；无停转反馈”，不宣称物理停转。
 - Pi 隔离目录构建无警告，`make test` 10 项通过（风扇5、MPU mock1、UART mock1、Qt fake3），ABI 45 项不变。Qt fake 覆盖右轮/双轮1024脉冲、两轮归零、任一轮返回EIO或抛异常；停机成功/失败截图已目视检查。本轮没有打开真实 UART 或翻转 GPIO4。
-- 新候选单独位于 `~/openlib-stopfix-20261030`，库 SHA-256 为 `e495984693391a121451cfa45d8769f78c67343cd0894f2e8eb645eec19c5c10`。`~/openlib-work`、`~/libuptech64` 和仓库旧 `.so` 均未替换；正在运行的 GUI 未重启。
+- 新候选单独位于 `~/openlib-stopfix-20261030`，库 SHA-256 为 `e495984693391a121451cfa45d8769f78c67343cd0894f2e8eb645eec19c5c10`。该候选生成时，`~/openlib-work`、`~/libuptech64` 和仓库旧 `.so` 均未替换；当时未重启运行中的 GUI。仓库预编译库和当前进程状态的后续更新见下节。
 
 车轮架空并固定、关闭旧 GUI 后，在 Pi 桌面终端启动：
 
@@ -78,3 +78,10 @@ python3 acceptance_gui.py ./libuptech.so
 先测试右轮速度100、左轮0、100 ms；不转则小步增加，不直接用1024。每次目视确认停止；持续转动立即切断电机电源。
 
 后续用户复测反馈（2026-10-30）：用户先确认“现在正常了”，在列出重复短脉冲、急停/取消解锁/正常关闭窗口、传感器同时刷新及 MPU 倾角/yaw 观察后，进一步确认“我都已经测过了”。本轮功能检查按用户实机验收反馈收尾，不再要求重复执行。原右轮持续转动症状由用户确认恢复正常；这些结论不是代理直接观测。具体速度、时长、次数、角度误差和漂移率未采集，不补造数据、不承诺量化精度。真实 TX/GPIO4 抓包属于可选的时序原因验证，未归档，不据此扩大为已验证现场唯一根因。正式目录替换、提交和推送不在本次验收确认范围内。
+
+## 仓库预编译库同步和实机运行版本（2026-10-30）
+
+- 用户授权更新仓库预编译库后，已将 `~/openlib-stopfix-20261030/libuptech.so` 同步至产品仓库 `libuptech.so`；文件为 AArch64 ELF64，74,744 B，SHA-256：`e495984693391a121451cfa45d8769f78c67343cd0894f2e8eb645eec19c5c10`。
+- 同步前核对候选目录 `libuptech.c` 和 `acceptance_gui.py` 与仓库源码一致（仅归一化换行符）；Pi ABI smoke 通过，导出仍为 45 个 FUNC、0 个 OBJECT。
+- 只读检查 `/proc/2515/maps`：运行中的 `python3 acceptance_gui.py ./libuptech.so` 工作目录为 `/home/shumeipai/openlib-stopfix-20261030`，映射库路径及 inode 均与上述修复版文件一致。因此本次检查时当前 GUI 使用新版，而非根据目录存在推测。
+- 正式安装路径 `/home/shumeipai/libuptech64/libuptech.so` 仍为旧版，SHA-256 `489b28caa1aa9f4ae363d0cb7878a215c33a6c648e18c4b4b869c891c3b6bbe5`。其他程序若显式加载此路径仍会用旧版；本次仅更新仓库，未替换正式目录或重启 GUI，未发送硬件命令。

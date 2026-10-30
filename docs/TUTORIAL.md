@@ -275,7 +275,7 @@ MPU 默认每 10 ms 缓存一次加速度和陀螺仪，并在软件中计算 `[
 
 UART 发送使用有界 `TIOCOUTQ` 等待，不再调用 `tcdrain()`；队列清空后继续保持 GPIO4 发送态一整帧线上时间加 20 µs，9 字节速度帧至少再等 110 µs。一次失败会重试完整发送，最多 3 次，成功后保持 1 ms 帧间隔。`ReadReg` 校验 `FF FF`、ID、精确 `count + 6` 字节总数以及 `length == count + 2` 字段。用户已确认停机功能恢复正常并完成所列功能测试；真实 GPIO4/TX 波形未归档。
 
-导出的 45 个函数中保留 18 个 LCD/UGUI 入口：17 个返回 `ENOTSUP`，`lcd_close` 返回 `0`。FUNC 数量是 45，不代表整个库完全 stripped；当前检出 `.so` 是旧产物，需由主流程在 Pi 上重建。
+导出的 45 个函数中保留 18 个 LCD/UGUI 入口：17 个返回 `ENOTSUP`，`lcd_close` 返回 `0`。FUNC 数量是 45，不代表整个库完全 stripped；仓库预编译 `.so` 已更新为用户验收过的 AArch64 停机修复版，包含 MPU 姿态及 UART 修订，哈希见 `OPTIMIZATION-VALIDATION.md`。
 
 动态库生命周期：调用方必须先停止所有使用该库的 API 线程，再调用 `dlclose()`。库会先停止并 join 采样线程，再关闭设备 fd。`pthread_atfork` 在 fork 前锁住库内互斥量，父子进程分别释放；子进程清空旧缓存，调用 `mpu6500_open()` 后可重建采样线程。Pi 模拟 I²C 回归已验证 fork 时另一线程持有 I²C 锁的场景；这不保证父子同时操作同一真实总线的协议安全，应用推荐 fork 后立即 exec。
 

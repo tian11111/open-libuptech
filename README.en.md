@@ -54,7 +54,7 @@ The chassis UART no longer uses `tcdrain()`, whose fixed wait was about 8 ms. Af
 
 `make test` runs device-free fan tests and a Linux MPU/UART mock regression covering concurrent range changes, attitude axes and units, fork, and sampler shutdown. Hardware MPU and UART checks run on the Pi; the PTY protocol test still configures and toggles GPIO4 but never writes the real `/dev/ttyAMA0`. `_verify_mpu.py` changes the FSR temporarily and restores the initial range in `finally`.
 
-Pi candidate verification on 2026-10-30 measured a 3.1 us median cached getter, 888.2 us synchronous reads, and about 1.03–1.05 g magnitude at rest. The candidate has the same 45 FUNC names as the old library. The first candidate was built in `~/openlib-work`; the motor-stop fix is in `~/openlib-stopfix-20261030`, and the user confirmed functional testing is complete. The checked-in `.so` and `~/libuptech64` have not been replaced. See the [validation record](docs/OPTIMIZATION-VALIDATION.md) and [comparison report](docs/REVERSE-ENGINEERING-REPORT.md).
+Pi candidate verification on 2026-10-30 measured a 3.1 us median cached getter, 888.2 us synchronous reads, and about 1.03–1.05 g magnitude at rest. The candidate has the same 45 FUNC names as the old library. The first candidate was built in `~/openlib-work`; the motor-stop fix is in `~/openlib-stopfix-20261030`, and the user confirmed functional testing is complete. The checked-in `libuptech.so` now contains the same fix; `~/libuptech64` on the Pi still contains the old library. See the [validation record](docs/OPTIMIZATION-VALIDATION.md) and [comparison report](docs/REVERSE-ENGINEERING-REPORT.md).
 
 ## Current limits
 
@@ -63,7 +63,7 @@ Pi candidate verification on 2026-10-30 measured a 3.1 us median cached getter, 
 - Attitude is a software complementary-filter result, not DMP; yaw is relative and drifts;
 - The tested chassis motors have no encoders, so position feedback is not treated as valid;
 - Fan control is provided by pigpio services outside the `libuptech.so` ABI;
-- 45 is the exported FUNC count, and the library is not fully stripped; the checked-in `.so` is still an older build, so rebuild on the Pi to validate the attitude and UART changes;
+- 45 is the exported FUNC count, and the library is not fully stripped; the checked-in `.so` includes MPU attitude and the UART stop fix. Its SHA-256 and build details are in the validation record;
 - No open-source license is declared yet; add a `LICENSE` file before formal redistribution.
 
 ![OpenLibUptech hardware acceptance GUI](./hardware-acceptance-overview.png)

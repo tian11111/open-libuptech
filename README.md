@@ -55,7 +55,7 @@ python3 acceptance_gui.py ./libuptech.so
 
 `make test` 只运行无设备风扇测试和 Linux MPU/UART 模拟回归，覆盖量程切换并发、姿态轴向与单位、fork 和采样线程退出。真实 MPU/UART 验证需在树莓派执行；PTY 协议测试会配置并翻转 GPIO4，但不会写真实 `/dev/ttyAMA0`。`_verify_mpu.py` 会临时切换 FSR，并在 `finally` 中恢复进入脚本时的量程。
 
-2026-10-30 Pi 候选验证：缓存 getter 中位数 3.1 µs，同步读取中位数 888.2 µs；重力模长约 1.03–1.05 g。ABI 与旧库 45 个 FUNC 名完全一致。初版候选在 `~/openlib-work` 构建；右轮停机修复版位于 `~/openlib-stopfix-20261030`，用户已确认功能测试完成。仓库预编译库和 `~/libuptech64` 尚未替换。验证详情见 [验收记录](docs/OPTIMIZATION-VALIDATION.md) 和 [逆向对比报告](docs/REVERSE-ENGINEERING-REPORT.md)。
+2026-10-30 Pi 候选验证：缓存 getter 中位数 3.1 µs，同步读取中位数 888.2 µs；重力模长约 1.03–1.05 g。ABI 与旧库 45 个 FUNC 名完全一致。初版候选在 `~/openlib-work` 构建；右轮停机修复版位于 `~/openlib-stopfix-20261030`，用户已确认功能测试完成。仓库预编译 `libuptech.so` 已更新为同一修复版；树莓派 `~/libuptech64` 仍保留旧版。验证详情见 [验收记录](docs/OPTIMIZATION-VALIDATION.md) 和 [逆向对比报告](docs/REVERSE-ENGINEERING-REPORT.md)。
 
 ## 当前边界
 
@@ -64,7 +64,7 @@ python3 acceptance_gui.py ./libuptech.so
 - 当前姿态是软件互补滤波结果，不是 DMP；yaw 是相对角且会漂移；
 - 底盘电机没有编码器，位置读取不作为有效反馈；
 - 风扇控制属于 pigpio 服务，不属于 `libuptech.so` ABI；
-- 45 是 FUNC 导出数，库并非完全 stripped；当前预编译 `.so` 仍是旧产物，姿态和 UART 修订需在 Pi 上重新构建后验证；
+- 45 是 FUNC 导出数，库并非完全 stripped；当前预编译 `.so` 包含 MPU 姿态及 UART 停机修复，SHA-256 与构建信息见验收记录；
 - 仓库当前还没有声明开源许可证，正式对外发布前请补充 `LICENSE`。
 
 ![OpenLibUptech hardware acceptance GUI](./hardware-acceptance-overview.png)
